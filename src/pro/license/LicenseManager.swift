@@ -89,8 +89,13 @@ class LicenseManager {
     }
 
     func initialize() {
+        #if LOCAL_PRO
+        onBeforeProUnlock()
+        #endif
         state = computeState()
+        #if !LOCAL_PRO
         scheduleAsyncRevalidationIfNeeded()
+        #endif
     }
 
     /// Trial `daysRemaining` is baked into the `state` enum, so it stays frozen until something
@@ -177,6 +182,9 @@ class LicenseManager {
     }
 
     func computeState() -> LicenseState {
+        #if LOCAL_PRO
+        return .pro
+        #else
         if keychain.value(account: Self.keychainKeyAccount) != nil {
             let lastValidationResult = defaults.bool(forKey: "lastValidationResult")
             guard lastValidationResult else { return .trialExpired }
@@ -190,6 +198,7 @@ class LicenseManager {
             return .pro
         }
         return computeTrialState()
+        #endif
     }
 
     private func computeTrialState() -> LicenseState {
