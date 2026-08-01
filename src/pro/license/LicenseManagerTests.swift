@@ -25,6 +25,14 @@ final class LicenseManagerTests: XCTestCase {
 
     // MARK: - Launch / initialize
 
+    #if LOCAL_PRO
+    func testLocalProBuildStartsProWithoutCredentials() {
+        manager.initialize()
+        XCTAssertEqual(manager.state, .pro)
+        XCTAssertEqual(api.validateCalls.count, 0)
+    }
+    #endif
+
     func testFirstLaunchStartsTrial() {
         manager.initialize()
         guard case .trial(let days) = manager.state else { return XCTFail("expected .trial, got \(manager.state)") }
@@ -528,4 +536,3 @@ final class MockLicenseAPI: LicenseAPI {
         DispatchQueue.main.async { completion(r) }
     }
 }
-
