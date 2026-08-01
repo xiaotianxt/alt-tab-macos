@@ -1,0 +1,120 @@
+name: Local Pro upstream release build
+
+on:
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: local-pro-upstream-release
+  cancel-in-progress: false
+
+env:
+  APP_PATH: DerivedData/Build/Products/Release/AltTab.app
+  ARCHIVE: AltTab-local-pro.tar.xz
+  RELEASE_BASE: https://github.com/xiaotianxt/alt-tab-macos/releases
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - run: sudo xcode-select -s /Applications/Xcode_26.0.1.app/Contents/Developer
+
+      - name: Determine upstream release
+        id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote add upstream https://github.com/lwouis/alt-tab-macos.git
+          git fetch upstream master --tags
+          upstream_tag=$(git describe --tags --match 'v[0-9]*' --exclude '*-local-pro' --abbrev=0 upstream/master)
+          upstream_version=${upstream_tag#v}
+          local_tag="$upstream_tag-local-pro"
+          if gh release view "$local_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            changed=false
+          else
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "upstream_tag=$upstream_tag" >> "$GITHUB_OUTPUT"
+          echo "build_version=$upstream_version" >> "$GITHUB_OUTPUT"
+          echo "local_tag=$local_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Rebase local changes onto upstream release and sync tags
+        if: steps.metadata.outputs.changed == 'true'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          fork_base=$(git merge-base HEAD upstream/master)
+          git rebase --onto "${{ steps.metadata.outputs.upstream_tag }}" "$fork_base"
+          git push --force-with-lease origin HEAD:master
+          git push origin --tags
+
+      - name: Test local Pro gate
+        if: steps.metadata.outputs.changed == 'true'
+        run: >-
+          xcodebuild test -project alt-tab-macos.xcodeproj -scheme Test
+          -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
+          'SWIFT_ACTIVE_COMPILATION_CONDITIONS=LOCAL_PRO'
+          -only-testing:unit-tests/LicenseManagerTests/testLocalProBuildStartsProWithoutCredentials
+
+      - name: Build universal app
+        if: steps.metadata.outputs.changed == 'true'
+        run: >-
+          xcodebuild -project alt-tab-macos.xcodeproj -scheme Release
+          -configuration Release -derivedDataPath DerivedData CODE_SIGN_IDENTITY=-
+          OTHER_CODE_SIGN_FLAGS=--timestamp=none
+          CURRENT_PROJECT_VERSION=${{ steps.metadata.outputs.build_version }}
+          'SWIFT_ACTIVE_COMPILATION_CONDITIONS=LOCAL_PRO'
+          SPARKLE_PUBLIC_ED_KEY=gwlckxArErUib3UpW2GlQ2dgPqGd37zAbzbkmml7ZX0=
+          'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO
+
+      - name: Package and create appcast
+        if: steps.metadata.outputs.changed == 'true'
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          BUILD_VERSION: ${{ steps.metadata.outputs.build_version }}
+          LOCAL_TAG: ${{ steps.metadata.outputs.local_tag }}
+        run: |
+          codesign --force --deep --sign - --entitlements alt_tab_macos.entitlements "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          tar --no-xattrs -cJf "$ARCHIVE" -C "$(dirname "$APP_PATH")" "$(basename "$APP_PATH")"
+          signature=$(printf %s "$SPARKLE_ED_PRIVATE_KEY" | vendor/Sparkle/bin/sign_update --ed-key-file - "$ARCHIVE")
+          published_at=$(LC_ALL=C date "+%a, %d %b %Y %H:%M:%S %z")
+          cat > appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>AltTab Local Pro</title>
+              <item>
+                <title>Version $BUILD_VERSION</title>
+                <pubDate>$published_at</pubDate>
+                <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+                <enclosure
+                  url="$RELEASE_BASE/latest/download/$ARCHIVE"
+                  sparkle:version="$BUILD_VERSION"
+                  sparkle:shortVersionString="$BUILD_VERSION"
+                  $signature
+                  type="application/octet-stream" />
+              </item>
+            </channel>
+          </rss>
+          EOF
+
+      - name: Publish release
+        if: steps.metadata.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCAL_TAG: ${{ steps.metadata.outputs.local_tag }}
+          UPSTREAM_TAG: ${{ steps.metadata.outputs.upstream_tag }}
+        run: |
+          git tag "$LOCAL_TAG"
+          git push origin "$LOCAL_TAG"
+          gh release create "$LOCAL_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "AltTab $LOCAL_TAG" --notes "Local Pro build rebased onto upstream $UPSTREAM_TAG." "$ARCHIVE" appcast.xml
