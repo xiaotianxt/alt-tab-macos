@@ -47,14 +47,13 @@ jobs:
           echo "build_version=$upstream_version" >> "$GITHUB_OUTPUT"
           echo "local_tag=$local_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Rebase local changes onto upstream release and sync tags
+      - name: Merge upstream release and sync tags
         if: steps.metadata.outputs.changed == 'true'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          fork_base=$(git merge-base HEAD upstream/master)
-          git rebase --onto "${{ steps.metadata.outputs.upstream_tag }}" "$fork_base"
-          git push --force-with-lease origin HEAD:master
+          git merge --no-edit "${{ steps.metadata.outputs.upstream_tag }}"
+          git push origin HEAD:master
           git push origin --tags
 
       - name: Test local Pro gate
@@ -117,4 +116,4 @@ jobs:
         run: |
           git tag "$LOCAL_TAG"
           git push origin "$LOCAL_TAG"
-          gh release create "$LOCAL_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "AltTab $LOCAL_TAG" --notes "Local Pro build rebased onto upstream $UPSTREAM_TAG." "$ARCHIVE" appcast.xml
+          gh release create "$LOCAL_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "AltTab $LOCAL_TAG" --notes "Local Pro build including upstream $UPSTREAM_TAG." "$ARCHIVE" appcast.xml
