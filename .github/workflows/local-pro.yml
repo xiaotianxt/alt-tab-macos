@@ -16,9 +16,11 @@ env:
   APP_PATH: DerivedData/Build/Products/Release/AltTab.app
   ARCHIVE: AltTab-local-pro.tar.xz
   RELEASE_BASE: https://github.com/xiaotianxt/alt-tab-macos/releases
+  LOCAL_PRO_REVISION: '1'
 
 jobs:
   build:
+    if: github.repository == 'xiaotianxt/alt-tab-macos' && github.ref == 'refs/heads/master'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
@@ -34,9 +36,9 @@ jobs:
         run: |
           git remote add upstream https://github.com/lwouis/alt-tab-macos.git
           git fetch upstream master --tags
-          upstream_tag=$(git describe --tags --match 'v[0-9]*' --exclude '*-local-pro' --abbrev=0 upstream/master)
+          upstream_tag=$(git describe --tags --match 'v[0-9]*' --exclude '*-local-pro*' --abbrev=0 upstream/master)
           upstream_version=${upstream_tag#v}
-          local_tag="$upstream_tag-local-pro"
+          local_tag="$upstream_tag-local-pro.$LOCAL_PRO_REVISION"
           if gh release view "$local_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             changed=false
           else
@@ -44,7 +46,7 @@ jobs:
           fi
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
           echo "upstream_tag=$upstream_tag" >> "$GITHUB_OUTPUT"
-          echo "build_version=$upstream_version" >> "$GITHUB_OUTPUT"
+          echo "build_version=$upstream_version.$LOCAL_PRO_REVISION" >> "$GITHUB_OUTPUT"
           echo "local_tag=$local_tag" >> "$GITHUB_OUTPUT"
 
       - name: Merge upstream release
@@ -74,6 +76,13 @@ jobs:
           SPARKLE_PUBLIC_ED_KEY=gwlckxArErUib3UpW2GlQ2dgPqGd37zAbzbkmml7ZX0=
           'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO
 
+      - name: Sign with persistent local Pro identity
+        if: steps.metadata.outputs.changed == 'true'
+        env:
+          LOCAL_PRO_SIGNING_P12: ${{ secrets.LOCAL_PRO_SIGNING_P12 }}
+          LOCAL_PRO_SIGNING_PASSWORD: ${{ secrets.LOCAL_PRO_SIGNING_PASSWORD }}
+        run: bash scripts/codesign/sign_local_pro.sh "$APP_PATH"
+
       - name: Package and create appcast
         if: steps.metadata.outputs.changed == 'true'
         env:
@@ -81,7 +90,6 @@ jobs:
           BUILD_VERSION: ${{ steps.metadata.outputs.build_version }}
           LOCAL_TAG: ${{ steps.metadata.outputs.local_tag }}
         run: |
-          codesign --force --deep --sign - --entitlements alt_tab_macos.entitlements "$APP_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           tar --no-xattrs -cJf "$ARCHIVE" -C "$(dirname "$APP_PATH")" "$(basename "$APP_PATH")"
           signature=$(printf %s "$SPARKLE_ED_PRIVATE_KEY" | vendor/Sparkle/bin/sign_update --ed-key-file - "$ARCHIVE")
@@ -96,7 +104,7 @@ jobs:
                 <pubDate>$published_at</pubDate>
                 <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
                 <enclosure
-                  url="$RELEASE_BASE/latest/download/$ARCHIVE"
+                  url="$RELEASE_BASE/download/$LOCAL_TAG/$ARCHIVE"
                   sparkle:version="$BUILD_VERSION"
                   sparkle:shortVersionString="$BUILD_VERSION"
                   $signature
@@ -115,4 +123,4 @@ jobs:
         run: |
           git tag "$LOCAL_TAG"
           git push origin "$LOCAL_TAG"
-          gh release create "$LOCAL_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "AltTab $LOCAL_TAG" --notes "Local Pro build including upstream $UPSTREAM_TAG." "$ARCHIVE" appcast.xml
+          gh release create "$LOCAL_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "AltTab $LOCAL_TAG" --notes "Local Pro build including upstream $UPSTREAM_TAG, signed with the persistent xiaotianxt identity. When upgrading from an ad-hoc build, remove and re-add AltTab in Accessibility once." "$ARCHIVE" appcast.xml
