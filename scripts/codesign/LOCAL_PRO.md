@@ -8,7 +8,7 @@ GitHub Actions repository secrets:
 - `LOCAL_PRO_SIGNING_PASSWORD`: PKCS#12 password.
 - `SPARKLE_ED_PRIVATE_KEY`: independent Sparkle archive-signing key; unchanged by this migration.
 
-`sign_local_pro.sh` imports the identity into a temporary keychain on the GitHub-hosted runner. Signing-time trust is restricted to the code-signing policy on that runner and removed on exit, along with the keychain and temporary files. No certificate installation or trust-store change is required on the user's Mac. Nested code retains its build-time signatures; the app is re-signed with its existing entitlements, then verified recursively.
+`sign_local_pro.sh` uses `rcodesign` 0.29.0, downloaded from its upstream release and verified against a pinned SHA-256 checksum. It signs directly from the PKCS#12 without importing into Keychain or modifying certificate trust settings. Credentials are held in a mode-0700 temporary directory and removed on exit; the password is passed by file, never as a command argument. Nested code retains its build-time signatures; the app is re-signed with its existing entitlements and hardened runtime, then verified recursively using Apple's `codesign`. No certificate installation or trust-store change is required on the user's Mac or CI runner.
 
 The app's designated requirement pins both `com.lwouis.alt-tab-macos` and the exact signing certificate. Do not replace it with an identifier-only requirement, rotate the certificate, change the bundle ID, or fall back to ad-hoc signing. Updates must satisfy the identity requirement saved when Accessibility permission was granted. This signing does not provide Apple notarization or Developer ID Gatekeeper approval.
 
@@ -21,7 +21,7 @@ The first persistent-identity release is `v11.7.1-local-pro.1` (app version `11.
 ```sh
 identity=$(openssl x509 -in scripts/codesign/local-pro-certificate.pem -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
 codesign --verify --deep --strict --all-architectures \
-  -R "identifier \"com.lwouis.alt-tab-macos\" and certificate leaf = H\"$identity\"" \
+  -R "=identifier \"com.lwouis.alt-tab-macos\" and certificate leaf = H\"$identity\"" \
   /Applications/AltTab.app
 codesign -dr - /Applications/AltTab.app
 ```
