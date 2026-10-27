@@ -5,12 +5,12 @@ class AboutTab {
         let appIcon = LightImageView()
         appIcon.translatesAutoresizingMaskIntoConstraints = false
         let appIconSize = NSSize(width: 128, height: 128)
-        appIcon.updateContents(.cgImage(App.appIcon(for: appIconSize)), appIconSize)
+        appIcon.updateContents(.cgImage(App.appIcon), appIconSize)
         appIcon.fit(128, 128)
         let appText = StackView([
             BoldLabel(App.name),
-            NSTextField(wrappingLabelWithString: NSLocalizedString("Version", comment: "") + " " + App.version),
-            NSTextField(wrappingLabelWithString: App.licence),
+            NSTextField(labelWithString: NSLocalizedString("Version", comment: "") + " " + App.version),
+            NSTextField(labelWithString: App.licence),
             HyperlinkLabel(NSLocalizedString("Website", comment: ""), Endpoints.website),
             HyperlinkLabel(NSLocalizedString("Source code", comment: ""), App.repository),
         ], .vertical)

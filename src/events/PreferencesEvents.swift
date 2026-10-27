@@ -48,13 +48,13 @@ class PreferencesEvents {
         #endif
         ControlsTab.initializePreferencesDependentState()
         #if DEBUG
-        if !Preferences.qaPristine { applyUpdatePolicyPreference() }
+        if !Preferences.qaPristine && !QaLifecycle.enabled { applyUpdatePolicyPreference() }
         #else
         applyUpdatePolicyPreference()
         #endif
         TrackpadEvents.toggle(Preferences.nextWindowGesture != .disabled)
         #if DEBUG
-        guard !Preferences.qaPristine else { return }
+        guard !Preferences.qaPristine && !QaLifecycle.enabled else { return }
         #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             LoginItem.applyCurrentPreference()
@@ -71,7 +71,8 @@ class PreferencesEvents {
             return
         }
         if LicenseManager.shared.isProLocked && ProFeature.isStoredValuePro(preferenceKey: key) {
-            UpgradeTab.navigateToUpgradeTab()
+            let feature: ProJourneyFeature = key.hasPrefix("appearanceStyle") ? .styles : key.hasPrefix("appearanceSize") ? .autoSize : .search
+            UpgradeTab.navigateToUpgradeTab(for: feature)
         }
         SearchDiscoveryHint.shared.cancel()
         ControlsTab.preferenceChanged(key)

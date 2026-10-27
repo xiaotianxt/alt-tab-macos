@@ -48,18 +48,6 @@ extension NSColor {
         NSColor(name: nil) { $0.isDarkMode ? dark : light }
     }
 
-    class var tableBorderColor: NSColor {
-        dynamicAppearanceColor(
-            light: NSColor(srgbRed: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 0.8),  // #e5e5e5
-            dark: NSColor(srgbRed: 75 / 255, green: 75 / 255, blue: 75 / 255, alpha: 0.8))       // #4b4b4b
-    }
-
-    class var tableBackgroundColor: NSColor {
-        dynamicAppearanceColor(
-            light: NSColor(srgbRed: 242 / 255, green: 242 / 255, blue: 242 / 255, alpha: 0.8),  // #f2f2f2
-            dark: NSColor(srgbRed: 43 / 255, green: 43 / 255, blue: 43 / 255, alpha: 0.8))       // #2b2b2b
-    }
-
     class var tableSeparatorColor: NSColor {
         dynamicAppearanceColor(
             light: NSColor(srgbRed: 231 / 255, green: 231 / 255, blue: 231 / 255, alpha: 0.8),  // #e7e7e7
@@ -194,13 +182,18 @@ extension NSImage {
     /// `rotated180` flips the glyph 180° around the image centre — used e.g. for the override
     /// indicator where the upright `arrow.triangle.branch` glyph reads better pointing
     /// downward ("this value branches to other shortcuts").
-    static func fromSymbol(_ symbol: Symbols, pointSize: CGFloat, rotated180: Bool = false) -> NSImage {
+    ///
+    /// `margin` adds transparent room on every side, keeping the glyph centred. Anti-aliasing paints
+    /// up to one device pixel past the ink bounds, so with no margin the glyph's bottom and left
+    /// edges are shaved flat (measured on the 13pt moon phases: the bottom and left pixel rows are
+    /// fully opaque, the top one is not).
+    static func fromSymbol(_ symbol: Symbols, pointSize: CGFloat, rotated180: Bool = false, margin: CGFloat = 0) -> NSImage {
         let font = NSFont(name: "SF Pro Text", size: pointSize)!
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         let attrStr = NSAttributedString(string: symbol.rawValue, attributes: attrs)
         let line = CTLineCreateWithAttributedString(attrStr)
         let inkBounds = CTLineGetImageBounds(line, nil)
-        let imageSize = NSSize(width: ceil(inkBounds.width), height: ceil(inkBounds.height))
+        let imageSize = NSSize(width: ceil(inkBounds.width + 2 * margin), height: ceil(inkBounds.height + 2 * margin))
         let image = NSImage(size: imageSize)
         image.lockFocus()
         if let ctx = NSGraphicsContext.current?.cgContext {
@@ -209,7 +202,8 @@ extension NSImage {
                 ctx.rotate(by: .pi)
                 ctx.translateBy(x: -imageSize.width / 2, y: -imageSize.height / 2)
             }
-            ctx.translateBy(x: -inkBounds.origin.x, y: -inkBounds.origin.y)
+            ctx.translateBy(x: (imageSize.width - inkBounds.width) / 2 - inkBounds.origin.x,
+                y: (imageSize.height - inkBounds.height) / 2 - inkBounds.origin.y)
             CTLineDraw(line, ctx)
         }
         image.unlockFocus()
@@ -219,19 +213,6 @@ extension NSImage {
 }
 
 extension CGImage {
-    static func allNamed(_ imageName: String) -> [CGImage] {
-        let imageURL = Bundle.main.url(forResource: imageName, withExtension: nil)!
-        let imageSource = CGImageSourceCreateWithURL(imageURL as CFURL, nil)!
-        let count = CGImageSourceGetCount(imageSource)
-        return (0..<count).compactMap { CGImageSourceCreateImageAtIndex(imageSource, $0, nil) }
-    }
-
-    static func bestMatch(_ images: [CGImage], for size: NSSize) -> CGImage {
-        let targetPx = Int(size.width.rounded())
-        return images.filter { $0.width >= targetPx }.min(by: { $0.width < $1.width })
-            ?? images.max(by: { $0.width < $1.width })!
-    }
-
     func size() -> NSSize {
         return NSSize(width: width, height: height)
     }

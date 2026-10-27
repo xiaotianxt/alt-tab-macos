@@ -10,7 +10,7 @@ private struct SettingsSectionDefinition {
     /// exactly once, in `addSection`.
     let builder: () -> NSView
     /// Optional hook for sections whose searchable content includes sidebar rows that are rebuilt
-    /// *after* the initial build (ControlsTab's shortcut rows). When set, `addSection` skips
+    /// *after* the initial build. When set, `addSection` skips
     /// `SidebarListRow`s in the build-time walk — they'd otherwise be captured as base targets that
     /// go stale on the next rebuild — and this closure re-registers the current rows into the
     /// section's *dynamic* search content (at build time, and again after each rebuild via
@@ -167,6 +167,11 @@ final class UpgradeButton: ProGradientButton {
     func refreshTitle() {
         wrappedWidth = bounds.width
         let state = LicenseManager.shared.state
+        if state == .trialNotStarted {
+            toolTip = ProFeatureCopy.trialSetup
+            applyTitle(secondary: nil, main: Self.attributed("Pro", Self.mainFont), height: Self.oneLineHeight)
+            return
+        }
         guard case .pro = state else {
             toolTip = nil
             applyTitle(secondary: trialSubtitle(state), main: Self.attributed(NSLocalizedString("Get Pro", comment: ""), Self.mainFont), height: Self.twoLineHeight)
@@ -270,7 +275,7 @@ class SettingsWindow: NSWindow {
     /// rather than extend edge-to-edge. The window width includes 2× this on top of the regular
     /// `contentWidth`, so TGVs keep their natural width and gain a visible gutter on each side.
     static let sectionContentHorizontalMargin = CGFloat(15)
-    static let sidebarWidth = CGFloat(175)
+    static let sidebarWidth = max(175, makeQuitButton().intrinsicContentSize.width.rounded(.up) + 2 * sidebarHorizontalPadding)
     /// Outer left pad between the splitview divider and the TableGroupView background. Kept
     /// symmetric with `contentTrailingPadding` so the visible TGV "shoulders" match on both sides.
     private static let contentHorizontalPadding = CGFloat(5)
@@ -290,8 +295,9 @@ class SettingsWindow: NSWindow {
     private static let sectionSelectionTriggerRatioWhenScrollingUp = CGFloat(0.6)
     private static let sectionSelectionDirectionDeltaThreshold = CGFloat(0.25)
     private static let minWindowHeight = CGFloat(400)
-    private static let defaultWindowHeight = CGFloat(570)
+    private static let defaultWindowHeight = CGFloat(600)
     private static let sidebarTopInset = CGFloat(40)
+    private static let logoIconSize = NSSize(width: 48, height: 48)
     static let sidebarHorizontalPadding = CGFloat(10)
     /// Padding inside the row's cell view between the cell's leading edge and the icon.
     /// `NSTableView.style = .sourceList` already inserts the cell content into its rounded
@@ -316,7 +322,7 @@ class SettingsWindow: NSWindow {
     private let sectionsDocumentView = SettingsFlippedView(frame: .zero)
     private let sectionsStack = NSStackView()
     private let upgradeButton = UpgradeButton()
-    private let quitButton = NSButton(title: String(format: NSLocalizedString("Quit %@", comment: "%@ is AltTab"), App.name), target: nil, action: #selector(NSApplication.terminate(_:)))
+    private let quitButton = SettingsWindow.makeQuitButton()
     private var sections = [SettingsSection]()
     private var visibleSections = [SettingsSection]()
     private var selectedSectionId: String?
@@ -406,7 +412,8 @@ class SettingsWindow: NSWindow {
     }
 
     private func setupSidebar() {
-        setupSearchField(sidebarContainer)
+        let logo = setupLogo(sidebarContainer)
+        setupSearchField(sidebarContainer, below: logo)
         setupQuitButton(sidebarContainer)
         setupUpgradeButton(sidebarContainer)
         setupSidebarTable(sidebarContainer)
@@ -466,13 +473,32 @@ class SettingsWindow: NSWindow {
         NotificationCenter.default.addObserver(self, selector: #selector(contentViewBoundsDidChange), name: NSView.boundsDidChangeNotification, object: rightScrollView.contentView)
     }
 
-    private func setupSearchField(_ parent: NSView) {
+    /// The app icon and name atop the sidebar, so the window reads as AltTab's at a glance.
+    private func setupLogo(_ parent: NSView) -> NSView {
+        let icon = NSImageView(image: NSImage(cgImage: App.appIcon, size: Self.logoIconSize))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.fit(Self.logoIconSize.width, Self.logoIconSize.height)
+        let name = NSTextField(labelWithString: App.name)
+        name.font = .systemFont(ofSize: 15, weight: .semibold)
+        let logo = NSStackView(views: [icon, name])
+        logo.translatesAutoresizingMaskIntoConstraints = false
+        logo.spacing = 8
+        logo.alignment = .centerY
+        parent.addSubview(logo)
+        NSLayoutConstraint.activate([
+            logo.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.sidebarTopInset),
+            logo.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.sidebarHorizontalPadding + 2),
+        ])
+        return logo
+    }
+
+    private func setupSearchField(_ parent: NSView, below logo: NSView) {
         searchField.delegate = self
         searchField.applySearchStyle()
         searchField.translatesAutoresizingMaskIntoConstraints = false
         parent.addSubview(searchField)
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.sidebarTopInset),
+            searchField.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 12),
             searchField.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.sidebarHorizontalPadding),
             searchField.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.sidebarHorizontalPadding),
         ])
@@ -535,7 +561,6 @@ class SettingsWindow: NSWindow {
 
     private func setupQuitButton(_ parent: NSView) {
         quitButton.toolTip = quitButton.title
-        quitButton.bezelStyle = .rounded
         quitButton.translatesAutoresizingMaskIntoConstraints = false
         parent.addSubview(quitButton)
         NSLayoutConstraint.activate([
@@ -545,12 +570,18 @@ class SettingsWindow: NSWindow {
         ])
     }
 
+    private static func makeQuitButton() -> NSButton {
+        let button = NSButton(title: String(format: NSLocalizedString("Quit %@", comment: "%@ is AltTab"), App.name), target: nil, action: #selector(NSApplication.terminate(_:)))
+        button.bezelStyle = .rounded
+        return button
+    }
+
     private func sectionDefinitions() -> [SettingsSectionDefinition] {
         [
             SettingsSectionDefinition(id: "appearance", title: NSLocalizedString("Appearance", comment: ""), symbol: .paintpalette, builder: AppearanceTab.initTab, registerDynamicSearchContent: nil),
             SettingsSectionDefinition(id: "controls", title: NSLocalizedString("Controls", comment: ""), symbol: .command, builder: ControlsTab.initTab, registerDynamicSearchContent: ControlsTab.registerSidebarRowsSearchContent),
             SettingsSectionDefinition(id: "general", title: NSLocalizedString("General", comment: ""), symbol: .gearshape, builder: GeneralTab.initTab, registerDynamicSearchContent: nil),
-            SettingsSectionDefinition(id: "exceptions", title: NSLocalizedString("Exceptions", comment: ""), symbol: .handRaised, builder: ExceptionsTab.initTab, registerDynamicSearchContent: nil),
+            SettingsSectionDefinition(id: "exceptions", title: NSLocalizedString("Exceptions", comment: ""), symbol: .handRaised, builder: ExceptionsTab.initTab, registerDynamicSearchContent: ExceptionsTab.registerSidebarRowsSearchContent),
         ]
     }
 

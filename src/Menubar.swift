@@ -42,7 +42,7 @@ class Menubar {
         menu.addItem(NSMenuItem.separator())
         addMenuItem(String(format: NSLocalizedString("About %@", comment: "Menubar option. %@ is AltTab"), App.name), #selector(App.showAboutWindow), "", "info.circle", nil, App.self)
         addMenuItem(NSLocalizedString("Debug tools", comment: "Menubar option"), #selector(App.showDebugWindow), "", "scope", nil, App.self)
-        addMenuItem(NSLocalizedString("Send feedback…", comment: "Menubar option"), #selector(App.showFeedbackPanel), "", "text.bubble", nil, App.self)
+        addMenuItem(NSLocalizedString("Send feedback", comment: "Menubar option") + "…", #selector(App.showFeedbackPanel), "", "text.bubble", nil, App.self)
         upgradeToProMenuItem = addMenuItem(NSLocalizedString("Get Pro", comment: "Menubar option"), App.upgradeToProAction, "", "star.fill", nil, App.self)
         upgradeToProMenuItem.view = UpgradeMenuItemView()
         myAccountMenuItem = addMenuItem(NSLocalizedString("My Account", comment: ""), App.openAccountAction, "", "person.crop.circle", nil, App.self)
@@ -85,6 +85,10 @@ class Menubar {
         guard upgradeToProMenuItem != nil else { return }
         let state = LicenseManager.shared.state
         switch state {
+        case .trialNotStarted:
+            toggleUpgradeMenuItem(false)
+            supportProjectMenuItem.isHidden = true
+            myAccountMenuItem.isHidden = true
         case .trial:
             toggleUpgradeMenuItem(true)
             supportProjectMenuItem.isHidden = true
@@ -120,7 +124,7 @@ class Menubar {
     // The callout is only useful when the user lacks Screen Recording AND has settings that need it
     // (Thumbnails style or window previews). Users who skipped the permission but use neither aren't
     // nagged (see #5623). Its copy names whichever of the two features are actually affected, so we
-    // refresh the text before showing it. Re-evaluated on permission ticks and on each menu open
+    // refresh the text before showing it. Re-evaluated on permission checks and on each menu open
     // (settings can change). Decision logic lives in `PermissionCalloutResolver` (unit-tested).
     static func refreshPermissionCallout() {
         let dependentFeatures = Preferences.screenRecordingDependentFeatures
@@ -197,22 +201,18 @@ class Menubar {
         }
     }
 
-    private static var badgeDotLayer: CALayer?
+    private(set) static var badgeDotLayer: CALayer?
 
     /// `NSStatusBar.system.thickness`: the status item working area, 22pt on every macOS so far
     /// (the visible menubar is taller since Tahoe, but items stay in a centred 22pt band).
-    /// The artwork is authored at 44pt. Handed over at that size it makes the button 44pt tall,
-    /// and macOS then draws the selection as a tall block overflowing the strip instead of the pill
-    /// every other menubar app gets. Any size <= 22 avoids that and renders identically, because
-    /// `.scaleProportionallyUpOrDown` below refits the image into the 22pt button either way. 22 is
-    /// the one that stays correct if that scaling mode ever changes: 44pt artwork at 22pt is an
-    /// exact 2:1 downscale, so one artboard unit is one device pixel on a retina display.
+    /// Keep the image's logical size at 22pt so the selection pill stays inside that band.
+    /// The vector PDFs render at the screen's backing scale without changing the button's size.
     private static let iconSize = CGFloat(22)
 
     static private func loadPreferredIcon() {
         let i = Preferences.menubarIcon.indexAsString
         let image = NSImage(named: "menubar-\(i)")!
-        image.isTemplate = i != "2"
+        image.isTemplate = Preferences.menubarIcon.isTemplate
         image.size = NSSize(width: iconSize, height: iconSize)
         statusItem.button!.image = image
         statusItem.isVisible = true
@@ -249,11 +249,6 @@ class Menubar {
         buttonLayer.addSublayer(dot)
         badgeDotLayer = dot
     }
-
-    static func showPopoverFromMenubar(_ popover: NSPopover) {
-        guard let button = statusItem?.button else { return }
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    }
 }
 
 class UpgradeMenuItemView: NSView {
@@ -281,7 +276,7 @@ class UpgradeMenuItemView: NSView {
         backdrop.layer?.addSublayer(gradientLayer)
         addSubview(backdrop)
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.maximumNumberOfLines = 2
+        label.maximumNumberOfLines = 3
         label.isEditable = false
         label.isSelectable = false
         label.drawsBackground = false
@@ -323,7 +318,7 @@ class UpgradeMenuItemView: NSView {
 
     override var intrinsicContentSize: NSSize {
         let labelSize = label.intrinsicContentSize
-        return NSSize(width: NSView.noIntrinsicMetric, height: ceil(labelSize.height) + 6)
+        return NSSize(width: ceil(labelSize.width) + 53, height: ceil(labelSize.height) + 6)
     }
 
     override func layout() {
@@ -434,8 +429,7 @@ class PermissionCallout: StackView {
         let location = convert(event.locationInWindow, from: nil)
         guard button.frame.contains(location) else { return }
         enclosingMenuItem?.menu?.cancelTracking()
-        Preferences.remove("screenRecordingPermissionSkipped")
-        App.restart()
+        PermissionsWindow.grantScreenRecording()
     }
 
     // Name only the feature(s) the user actually enabled, so we never promise back a feature they
