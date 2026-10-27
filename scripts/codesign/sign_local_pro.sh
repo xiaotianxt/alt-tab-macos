@@ -27,10 +27,18 @@ printf '%s' "$LOCAL_PRO_SIGNING_PASSWORD" > "$temporary_dir/password"
 unset LOCAL_PRO_SIGNING_P12 LOCAL_PRO_SIGNING_PASSWORD
 csreq -r "=$requirement" -b "$temporary_dir/requirement.bin"
 
-# Nested frameworks/helpers retain their build-time signatures and entitlements.
+# Vendored helpers carry upstream's Developer ID, which makes Sparkle reject our
+# self-signed host over XPC. Use Sparkle's standard ad-hoc helper signing mode;
+# archive authenticity and the host's persistent certificate remain unchanged.
+sparkle="$app_path/Contents/Frameworks/Sparkle.framework"
+for helper in "$sparkle/Versions/Current/Autoupdate" "$sparkle/Versions/Current/Updater.app"; do
+    codesign --force --sign - --options runtime --timestamp=none "$helper"
+done
+codesign --force --sign - --timestamp=none "$sparkle"
+
 "$temporary_dir/apple-codesign-0.29.0-macos-universal/rcodesign" sign --config-file /dev/null \
     --p12-file "$temporary_dir/identity.p12" --p12-password-file "$temporary_dir/password" \
     --timestamp-url none --exclude '**' --code-signature-flags runtime \
     --code-requirements-file "$temporary_dir/requirement.bin" \
     --entitlements-xml-file "$script_dir/../../alt_tab_macos.entitlements" "$app_path"
-codesign --verify --deep --strict --all-architectures --verbose=2 -R "=$requirement" "$app_path"
+bash "$script_dir/verify_local_pro.sh" "$app_path"

@@ -8,7 +8,7 @@ GitHub Actions repository secrets:
 - `LOCAL_PRO_SIGNING_PASSWORD`: PKCS#12 password.
 - `SPARKLE_ED_PRIVATE_KEY`: independent Sparkle archive-signing key; unchanged by this migration.
 
-`sign_local_pro.sh` uses `rcodesign` 0.29.0, downloaded from its upstream release and verified against a pinned SHA-256 checksum. It signs directly from the PKCS#12 without importing into Keychain or modifying certificate trust settings. Credentials are held in a mode-0700 temporary directory and removed on exit; the password is passed by file, never as a command argument. Nested code retains its build-time signatures; the app is re-signed with its existing entitlements and hardened runtime, then verified recursively using Apple's `codesign`. No certificate installation or trust-store change is required on the user's Mac or CI runner.
+`sign_local_pro.sh` uses `rcodesign` 0.29.0, downloaded from its upstream release and verified against a pinned SHA-256 checksum. It signs directly from the PKCS#12 without importing into Keychain or modifying certificate trust settings. Credentials are held in a mode-0700 temporary directory and removed on exit; the password is passed by file, never as a command argument. Before signing the host, the script ad-hoc signs Sparkle's Autoupdate and Updater.app with hardened runtime and re-seals Sparkle.framework. The vendored helpers otherwise carry upstream's Developer ID and require XPC peers to have that Apple Team ID, rejecting our self-signed host. This is Sparkle's standard ad-hoc helper mode, not a change to Sparkle's validation code. The app is re-signed with its existing entitlements and hardened runtime. `verify_local_pro.sh` verifies the persistent host identity recursively and requires both helper architectures to be ad-hoc signed without a Team ID. No certificate installation or trust-store change is required on the user's Mac or CI runner.
 
 The app's designated requirement pins both `com.lwouis.alt-tab-macos` and the exact signing certificate. Do not replace it with an identifier-only requirement, rotate the certificate, change the bundle ID, or fall back to ad-hoc signing. Updates must satisfy the identity requirement saved when Accessibility permission was granted. This signing does not provide Apple notarization or Developer ID Gatekeeper approval.
 
@@ -27,6 +27,8 @@ codesign -dr - /Applications/AltTab.app
 ```
 
 Actual TCC permission retention must also be checked across a subsequent installed update. Do not claim that signature verification alone proves that end-to-end behavior.
+
+Packaging revision 2 fixes the helper Team ID mismatch. Existing revision-1 installations cannot install it through their broken helper: manually install revision 2 once. Subsequent updates still require an actual Sparkle installation test; static signature checks alone do not prove the whole update flow.
 
 ## Recovery
 
