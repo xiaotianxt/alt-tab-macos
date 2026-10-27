@@ -16,7 +16,7 @@ env:
   APP_PATH: DerivedData/Build/Products/Release/AltTab.app
   ARCHIVE: AltTab-local-pro.tar.xz
   RELEASE_BASE: https://github.com/xiaotianxt/alt-tab-macos/releases
-  LOCAL_PRO_REVISION: '2'
+  LOCAL_PRO_REVISION: '3'
 
 jobs:
   build:
